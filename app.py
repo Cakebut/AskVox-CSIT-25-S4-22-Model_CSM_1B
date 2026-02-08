@@ -8,7 +8,7 @@ from transformers import AutoProcessor, AutoModel
 # -----------------------
 # Model loading (cold start)
 # -----------------------
-MODEL_ID = "YOUR_HF_USERNAME/csm-1b"
+MODEL_ID = "cakebut/askvoxcsm-1b"
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
