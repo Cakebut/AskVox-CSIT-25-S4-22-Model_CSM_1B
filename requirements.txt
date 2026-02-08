@@ -1,0 +1,24 @@
+# RunPod serverless handler
+runpod
+
+# PyTorch (installed separately with CUDA in Dockerfile)
+# Do NOT put torch here if installing via pip with CUDA index
+
+# Hugging Face
+transformers
+huggingface_hub
+accelerate
+
+# Audio processing
+soundfile
+librosa
+scipy
+numpy
+
+# FastAPI (if exposing HTTP inside container)
+fastapi
+uvicorn
+
+# Optional but useful
+pydantic
+requests
