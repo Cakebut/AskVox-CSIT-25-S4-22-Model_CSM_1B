@@ -1,27 +1,9 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-
-# Env
-.env
-
-# HuggingFace cache
-.cache/
-huggingface/
-
-# Model files
-*.safetensors
-*.bin
+hf_cache/
 *.pt
-*.gguf
-model/
-models/
-checkpoints/
-
-# Audio temp
+*.bin
+*.safetensors
 *.wav
 *.mp3
-
-# OS
-.DS_Store
+__pycache__/
+.git/
+.env
