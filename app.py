@@ -6,59 +6,81 @@ import soundfile as sf
 from transformers import AutoProcessor, AutoModel
 
 # -----------------------
-# Model loading (cold start)
+# Configuration
 # -----------------------
-MODEL_ID = "cakebut/askvoxcsm-1b"
+MODEL_ID = "cakebut/askvoxcsm-1b"   # your HF repo
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-print("Loading CSM-1B model...")
+print(f"[CSM] Loading model on {device}...")
 
-processor = AutoProcessor.from_pretrained(MODEL_ID)
+# -----------------------
+# Model loading (cold start)
+# -----------------------
+processor = AutoProcessor.from_pretrained(
+    MODEL_ID,
+    trust_remote_code=True
+)
+
 model = AutoModel.from_pretrained(
     MODEL_ID,
-    torch_dtype=torch.float16,
-).to(device)
+    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+    trust_remote_code=True,
+)
 
+model = model.to(device)
 model.eval()
 
-print("CSM-1B loaded successfully")
+if device == "cuda":
+    model.half()
+    torch.backends.cudnn.benchmark = True
+
+print("[CSM] Model loaded successfully")
 
 # -----------------------
-# TTS function
+# TTS Generation
 # -----------------------
 def generate_audio(text: str):
-    inputs = processor(text=text, return_tensors="pt").to(device)
+    if not text.strip():
+        raise ValueError("Empty text")
 
-    with torch.no_grad():
+    inputs = processor(
+        text=text,
+        return_tensors="pt"
+    ).to(device)
+
+    with torch.inference_mode():
         audio = model.generate(**inputs)
 
+    # Convert to numpy
     audio = audio.cpu().numpy().squeeze()
 
-    # Save to WAV in memory
+    # Save WAV to memory
     buffer = io.BytesIO()
     sf.write(buffer, audio, samplerate=22050, format="WAV")
     buffer.seek(0)
 
-    # Convert to base64 for RunPod response
+    # Encode base64
     audio_base64 = base64.b64encode(buffer.read()).decode("utf-8")
 
     return audio_base64
 
 # -----------------------
-# RunPod handler
+# RunPod Handler
 # -----------------------
 def handler(job):
-    inp = job.get("input", {})
-    text = inp.get("text")
-
-    if not text:
-        return {"error": "Missing input.text"}
-
-    if not isinstance(text, str):
-        return {"error": "input.text must be a string"}
-
     try:
+        inp = job.get("input", {})
+        text = inp.get("text")
+
+        if text is None:
+            return {"error": "Missing input.text"}
+
+        if not isinstance(text, str):
+            return {"error": "input.text must be a string"}
+
+        print(f"[CSM] Generating audio for text: {text[:60]}")
+
         audio_b64 = generate_audio(text)
 
         return {
@@ -68,9 +90,10 @@ def handler(job):
         }
 
     except Exception as e:
+        print("[CSM ERROR]", str(e))
         return {"error": str(e)}
 
 # -----------------------
-# Start serverless
+# Start Serverless
 # -----------------------
 runpod.serverless.start({"handler": handler})
