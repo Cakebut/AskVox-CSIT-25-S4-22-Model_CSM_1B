@@ -1,9 +1,8 @@
-runpod==1.8.1
-torch
-transformers
+torch==2.2.0
+transformers>=4.40.0
 accelerate
+soundfile
+runpod
+sentencepiece
 safetensors
 huggingface_hub
-numpy
-soundfile
-sentencepiece
