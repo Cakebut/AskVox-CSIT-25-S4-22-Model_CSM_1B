@@ -1,4 +1,8 @@
-torch>=2.1.0
-transformers>=4.52.0.dev0
-soundfile
+torch==2.3.0
+transformers>=4.52.0
+accelerate
 runpod
+soundfile
+huggingface_hub
+sentencepiece
+protobuf
