@@ -1,53 +1,42 @@
+import os
 import base64
 import io
 import runpod
 import torch
 import soundfile as sf
-from transformers import AutoProcessor, AutoModel
+from transformers import AutoModelForTextToWaveform
 
-# -----------------------
-# Config
-# -----------------------
-MODEL_ID = "cakebut/askvoxcsm-1b"
+MODEL_ID = os.getenv("MODEL_ID")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-dtype = torch.float16 if device == "cuda" else torch.float32
 
-print("Loading CSM-1B from local cache...")
+print("Loading CSM-1B...")
 
-# Load from cache (downloaded during Docker build)
-processor = AutoProcessor.from_pretrained(
+model = AutoModelForTextToWaveform.from_pretrained(
     MODEL_ID,
-    trust_remote_code=True
-)
-
-model = AutoModel.from_pretrained(
-    MODEL_ID,
-    torch_dtype=dtype,
-    trust_remote_code=True
+    trust_remote_code=True,
+    torch_dtype=torch.float16
 ).to(device)
 
 model.eval()
 
-print("CSM-1B loaded successfully on", device)
+print("Model loaded")
+
 
 # -----------------------
 # TTS generation
 # -----------------------
-def generate_audio(text: str):
-    inputs = processor(text=text, return_tensors="pt").to(device)
-
+def generate_audio(text):
     with torch.no_grad():
-        audio = model.generate(**inputs)
+        audio = model.generate(text)
 
-    audio = audio.cpu().numpy().squeeze()
+    audio = audio.cpu().numpy()
 
-    # Save to memory as WAV
     buffer = io.BytesIO()
     sf.write(buffer, audio, samplerate=22050, format="WAV")
     buffer.seek(0)
 
-    return base64.b64encode(buffer.read()).decode("utf-8")
+    return base64.b64encode(buffer.read()).decode()
 
 
 # -----------------------
