@@ -1,21 +1,71 @@
-FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
+import os
+import base64
+import io
+import runpod
+import torch
+import soundfile as sf
+from transformers import AutoModelForTextToWaveform
 
-WORKDIR /app
+MODEL_ID = os.getenv("MODEL_ID")
 
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    libsndfile1 \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
-RUN pip install --upgrade pip
+print("Loading CSM-1B...")
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+model = AutoModelForTextToWaveform.from_pretrained(
+    MODEL_ID,
+    trust_remote_code=True,
+    torch_dtype=torch.float16
+).to(device)
 
-ENV HF_HOME=/tmp/hf_cache
-ENV MODEL_ID=cakebut/askvoxcsm-1b
+model.eval()
 
-COPY app.py .
+print("Model loaded")
 
-CMD ["python", "app.py"]
+
+# -----------------------
+# TTS generation
+# -----------------------
+def generate_audio(text):
+    with torch.no_grad():
+        audio = model.generate(text)
+
+    audio = audio.cpu().numpy()
+
+    buffer = io.BytesIO()
+    sf.write(buffer, audio, samplerate=22050, format="WAV")
+    buffer.seek(0)
+
+    return base64.b64encode(buffer.read()).decode()
+
+
+# -----------------------
+# RunPod handler
+# -----------------------
+def handler(job):
+    inp = job.get("input", {})
+    text = inp.get("text")
+
+    if not text:
+        return {"error": "Missing input.text"}
+
+    if not isinstance(text, str):
+        return {"error": "input.text must be a string"}
+
+    try:
+        audio_b64 = generate_audio(text)
+
+        return {
+            "audio_base64": audio_b64,
+            "format": "wav",
+            "sample_rate": 22050
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# -----------------------
+# Start serverless
+# -----------------------
+runpod.serverless.start({"handler": handler})
