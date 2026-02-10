@@ -6,3 +6,4 @@ runpod
 sentencepiece
 safetensors
 huggingface_hub
+einops
