@@ -10,21 +10,26 @@ from transformers import AutoProcessor, CsmForConditionalGeneration
 # Configuration
 # -----------------------
 MODEL_ID = os.getenv("MODEL_ID", "cakebut/askvoxcsm-1b")
+HF_TOKEN = os.getenv("HF_TOKEN", None)  # required if repo is private
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-print(f"Loading CSM-1B model on {DEVICE}...")
+print(f"Loading CSM-1B model from {MODEL_ID} on {DEVICE}...")
 
 # Load processor & model
-processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+processor = AutoProcessor.from_pretrained(
+    MODEL_ID,
+    trust_remote_code=True,
+    use_auth_token=HF_TOKEN
+)
 model = CsmForConditionalGeneration.from_pretrained(
     MODEL_ID,
     torch_dtype=torch.float16,
     device_map="auto",
-    trust_remote_code=True
+    trust_remote_code=True,
+    use_auth_token=HF_TOKEN
 )
 model.eval()
-
-print("Model loaded successfully")
+print("Model loaded successfully!")
 
 # -----------------------
 # TTS generation
@@ -37,7 +42,7 @@ def generate_audio(text: str) -> str:
     with torch.no_grad():
         audio_tokens = model.generate(**inputs)
 
-    # Decode tokens to waveform
+    # Decode audio tokens to waveform
     audio_waveform = processor.decode(audio_tokens[0])
 
     # Save waveform to buffer
