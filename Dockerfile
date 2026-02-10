@@ -2,24 +2,37 @@ FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
 
 WORKDIR /app
 
-# System dependencies for audio processing
+# System deps (audio)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip
 RUN pip install --upgrade pip
 
-# Install Python dependencies (no cache to reduce image size)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Python deps (minimal to avoid large image)
+RUN pip install \
+    runpod \
+    transformers \
+    accelerate \
+    soundfile \
+    sentencepiece \
+    huggingface_hub
 
-# Copy application
+# Set HF cache inside image
+ENV HF_HOME=/app/hf_cache
+
+# ---- Download model at build time ----
+# IMPORTANT: replace with your HF repo
+ENV MODEL_ID=cakebut/askvoxcsm-1b
+
+RUN python -c "from transformers import AutoProcessor, AutoModel; \
+AutoProcessor.from_pretrained('$MODEL_ID', trust_remote_code=True); \
+AutoModel.from_pretrained('$MODEL_ID', trust_remote_code=True)"
+
+# Copy app
 COPY app.py .
-
-# HuggingFace cache location (ephemeral for serverless)
-ENV HF_HOME=/tmp/hf_cache
-ENV TRANSFORMERS_CACHE=/tmp/hf_cache
 
 CMD ["python", "app.py"]
