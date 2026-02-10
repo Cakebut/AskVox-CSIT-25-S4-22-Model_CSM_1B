@@ -1,49 +1,55 @@
 import os
-import base64
 import io
-import runpod
+import base64
 import torch
 import soundfile as sf
-from transformers import AutoModelForTextToWaveform
+import runpod
+from transformers import AutoProcessor, CsmForConditionalGeneration
 
-MODEL_ID = os.getenv("MODEL_ID")
+# -----------------------
+# Configuration
+# -----------------------
+MODEL_ID = os.getenv("MODEL_ID", "sesame/csm-1b")
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Loading CSM-1B model on {DEVICE}...")
 
-print("Loading CSM-1B on", device)
-
-model = AutoModelForTextToWaveform.from_pretrained(
+# Load processor & model
+processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+model = CsmForConditionalGeneration.from_pretrained(
     MODEL_ID,
-    trust_remote_code=True,
     torch_dtype=torch.float16,
     device_map="auto",
-    low_cpu_mem_usage=True
+    trust_remote_code=True
 )
-
 model.eval()
 
-print("Model loaded")
-
+print("Model loaded successfully")
 
 # -----------------------
 # TTS generation
 # -----------------------
-def generate_audio(text):
+def generate_audio(text: str) -> str:
+    # Encode text
+    inputs = processor(text=text, return_tensors="pt").to(DEVICE)
+
+    # Generate audio tokens
     with torch.no_grad():
-        audio = model.generate(text=text)
+        audio_tokens = model.generate(**inputs)
 
-    if isinstance(audio, torch.Tensor):
-        audio = audio.cpu().numpy()
+    # Decode tokens to waveform
+    audio_waveform = processor.decode(audio_tokens[0])
 
+    # Save waveform to buffer
     buffer = io.BytesIO()
-    sf.write(buffer, audio, samplerate=22050, format="WAV")
+    sf.write(buffer, audio_waveform, samplerate=24000, format="WAV")
     buffer.seek(0)
 
+    # Return base64 string
     return base64.b64encode(buffer.read()).decode()
 
-
 # -----------------------
-# RunPod handler
+# RunPod serverless handler
 # -----------------------
 def handler(job):
     inp = job.get("input", {})
@@ -51,22 +57,18 @@ def handler(job):
 
     if not text:
         return {"error": "Missing input.text"}
-
     if not isinstance(text, str):
         return {"error": "input.text must be a string"}
 
     try:
         audio_b64 = generate_audio(text)
-
         return {
             "audio_base64": audio_b64,
             "format": "wav",
-            "sample_rate": 22050
+            "sample_rate": 24000
         }
-
     except Exception as e:
         return {"error": str(e)}
-
 
 # -----------------------
 # Start serverless
