@@ -10,13 +10,15 @@ MODEL_ID = os.getenv("MODEL_ID")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-print("Loading CSM-1B...")
+print("Loading CSM-1B on", device)
 
 model = AutoModelForTextToWaveform.from_pretrained(
     MODEL_ID,
     trust_remote_code=True,
-    torch_dtype=torch.float16
-).to(device)
+    torch_dtype=torch.float16,
+    device_map="auto",
+    low_cpu_mem_usage=True
+)
 
 model.eval()
 
@@ -28,9 +30,10 @@ print("Model loaded")
 # -----------------------
 def generate_audio(text):
     with torch.no_grad():
-        audio = model.generate(text)
+        audio = model.generate(text=text)
 
-    audio = audio.cpu().numpy()
+    if isinstance(audio, torch.Tensor):
+        audio = audio.cpu().numpy()
 
     buffer = io.BytesIO()
     sf.write(buffer, audio, samplerate=22050, format="WAV")
