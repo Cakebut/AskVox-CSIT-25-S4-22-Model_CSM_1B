@@ -2,4 +2,6 @@ torch
 transformers
 huggingface_hub
 soundfile
+fastapi
+uvicorn[standard]
 runpod
