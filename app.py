@@ -2,8 +2,8 @@ import os
 import io
 import base64
 import torch
-import soundfile as sf
 import runpod
+
 from transformers import AutoProcessor, CsmForConditionalGeneration
 
 # -------------------------------
@@ -12,8 +12,8 @@ from transformers import AutoProcessor, CsmForConditionalGeneration
 MODEL_ID = os.getenv("MODEL_ID", "cakebut/askvoxcsm-1b")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-print("Loading model from:", MODEL_ID)
-print("Using device:", device)
+print(f"Loading model from: {MODEL_ID}")
+print(f"Using device: {device}")
 
 # -------------------------------
 # Load processor + model
@@ -21,8 +21,7 @@ print("Using device:", device)
 processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
 model = CsmForConditionalGeneration.from_pretrained(
     MODEL_ID,
-    device_map="auto",
-    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+    device_map=device,
     trust_remote_code=True
 )
 model.eval()
@@ -31,23 +30,20 @@ print("Model loaded successfully!")
 # -------------------------------
 # Generate audio
 # -------------------------------
-def generate_audio(text: str):
-    # Add speaker prefix for CSM
+def generate_audio(text: str) -> bytes:
+    # CSM expects a speaker prefix
     text = f"[0]{text}"
 
-    # Prepare inputs
-    inputs = processor(text, return_tensors="pt").to(device)
+    # Tokenize input
+    inputs = processor(text, add_special_tokens=True).to(device)
 
-    # Generate audio tokens
+    # Generate audio
     with torch.no_grad():
-        audio_tokens = model.generate(**inputs, output_audio=True)
+        audio = model.generate(**inputs, output_audio=True)
 
-    # Decode waveform
-    waveform = processor.decode(audio_tokens[0])
-
-    # Write to buffer as WAV
+    # Save audio to buffer
     buffer = io.BytesIO()
-    sf.write(buffer, waveform, samplerate=24000, format="WAV")
+    processor.save_audio(audio, buffer)
     buffer.seek(0)
     return buffer.read()
 
@@ -55,28 +51,23 @@ def generate_audio(text: str):
 # RunPod handler
 # -------------------------------
 def handler(job):
-    job_input = job.get("input", {})
-    text = job_input.get("text")
-
+    text = job.get("input", {}).get("text")
     if not text:
         return {"error": "Missing input.text"}
 
     try:
         audio_bytes = generate_audio(text)
         audio_b64 = base64.b64encode(audio_bytes).decode()
-
         return {
             "audio_base64": audio_b64,
-            "sample_rate": 24000,
-            "format": "wav"
+            "format": "wav",
+            "sample_rate": 24000
         }
-
     except Exception as e:
-        print("Error generating audio:", str(e))
         return {"error": str(e)}
 
 # -------------------------------
-# Start RunPod serverless worker
+# Start RunPod worker
 # -------------------------------
 print("Worker ready.")
 runpod.serverless.start({"handler": handler})
