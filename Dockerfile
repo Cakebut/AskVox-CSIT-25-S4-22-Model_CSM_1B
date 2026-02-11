@@ -1,33 +1,45 @@
 # -------------------------------
-# Base image with PyTorch + CUDA
+# Base image with CUDA + PyTorch
 # -------------------------------
 FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
 
 WORKDIR /app
 
+# -------------------------------
 # Install system dependencies
+# -------------------------------
 RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
     git \
     wget \
-    python3-pip \
+    build-essential \
  && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip
-RUN pip install --upgrade pip
+RUN python -m pip install --upgrade pip
 
+# -------------------------------
 # Install Python dependencies
+# -------------------------------
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Set HF_TOKEN if private repo
-# ENV HF_TOKEN=hf_xxxxx
+# Upgrade HF hub to support subfolder downloads
+RUN pip install --upgrade huggingface_hub
 
+# -------------------------------
 # Download CSM-1B model from Hugging Face
+# -------------------------------
+ARG HF_TOKEN
 RUN python -c "from huggingface_hub import snapshot_download; \
-    snapshot_download(repo_id='cakebut/askvoxcsm-1b', subfolder='csm-1b', local_dir='./csm-1b', token=None)"
+snapshot_download(repo_id='cakebut/askvoxcsm-1b', subfolder='csm-1b', local_dir='./csm-1b', token='$HF_TOKEN')"
 
+# -------------------------------
 # Copy app code
+# -------------------------------
 COPY app.py .
 
-# Run the app
-CMD ["python", "app.py"]
+# Run server
+CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7000"]
