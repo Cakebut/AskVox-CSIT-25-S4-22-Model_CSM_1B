@@ -9,7 +9,7 @@ from transformers import AutoProcessor, CsmForConditionalGeneration
 # -----------------------
 # Configuration
 # -----------------------
-MODEL_ID = os.getenv("MODEL_ID", "cakebut/askvoxcsm-1b")
+MODEL_ID = os.getenv("MODEL_ID", "cakebut/askvoxcsm-1b/csm-1b")
 HF_TOKEN = os.getenv("HF_TOKEN", None)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
