@@ -3,35 +3,32 @@ import io
 import base64
 import torch
 import soundfile as sf
-import runpod
-
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from transformers import AutoProcessor, CsmForConditionalGeneration
-from huggingface_hub import hf_hub_download, snapshot_download
 
+# -------------------------------
+# CONFIG
+# -------------------------------
+REPO_LOCAL_PATH = "./csm-1b"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEFAULT_VOICE = "conversational_a"
 
-# Model folder (already downloaded in Dockerfile)
-MODEL_PATH = "./csm-1b"
-
-print(f"Loading CSM model from {MODEL_PATH} on {DEVICE}...")
-
-# Load processor and model
-processor = AutoProcessor.from_pretrained(
-    MODEL_PATH,
-    trust_remote_code=True
-)
-
+# -------------------------------
+# Load processor & model
+# -------------------------------
+processor = AutoProcessor.from_pretrained(REPO_LOCAL_PATH, trust_remote_code=True)
 model = CsmForConditionalGeneration.from_pretrained(
-    MODEL_PATH,
+    REPO_LOCAL_PATH,
     torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
     device_map="auto",
     trust_remote_code=True
 )
-
 model.eval()
-print("✅ Model loaded successfully!")
 
-# Load prompts
+# -------------------------------
+# Load voice prompts
+# -------------------------------
 PROMPT_AUDIO = {}
 PROMPT_FILES = {
     "conversational_a": "prompts/conversational_a.wav",
@@ -43,69 +40,49 @@ PROMPT_FILES = {
 }
 
 for voice, path in PROMPT_FILES.items():
-    try:
-        local_path = os.path.join(MODEL_PATH, path)
+    local_path = os.path.join(REPO_LOCAL_PATH, path)
+    if os.path.exists(local_path):
         audio, sr = sf.read(local_path)
         PROMPT_AUDIO[voice] = (audio, sr)
-        print(f"Loaded prompt: {voice}")
-    except Exception as e:
-        print(f"Failed to load {voice}: {e}")
 
-DEFAULT_VOICE = "conversational_a"
 if not PROMPT_AUDIO:
-    raise RuntimeError("No prompts loaded!")
+    raise RuntimeError("No prompts loaded. Worker cannot start.")
 
-# Audio generation
-def generate_audio(text: str, voice: str) -> bytes:
-    if voice not in PROMPT_AUDIO:
-        voice = DEFAULT_VOICE
+# -------------------------------
+# FastAPI app
+# -------------------------------
+app = FastAPI(title="AskVox CSM-1B Server")
+
+class GenerateRequest(BaseModel):
+    text: str
+    voice: str = DEFAULT_VOICE
+
+@app.get("/ping")
+def ping():
+    return {"status": "ok", "message": "Model is ready"}
+
+@app.post("/generate")
+def generate(req: GenerateRequest):
+    voice = req.voice if req.voice in PROMPT_AUDIO else DEFAULT_VOICE
     audio_prompt, sr = PROMPT_AUDIO[voice]
 
-    text_input = f"[0]{text}"
+    # CSM expects speaker prefix
+    text_input = f"[0]{req.text}"
 
-    inputs = processor(
-        text_input,
-        add_special_tokens=True,
-        return_tensors="pt"
-    ).to(DEVICE)
+    # Tokenize
+    inputs = processor(text_input, return_tensors="pt").to(DEVICE)
 
+    # Generate audio tokens
     with torch.no_grad():
-        audio_tokens = model.generate(
-            **inputs,
-            max_new_tokens=1024,
-            output_audio=True
-        )
+        audio_tokens = model.generate(**inputs, max_new_tokens=1024, output_audio=True)
 
+    # Decode waveform
     waveform = processor.decode(audio_tokens[0])
 
+    # Convert to WAV bytes
     buffer = io.BytesIO()
     sf.write(buffer, waveform, samplerate=24000, format="WAV")
     buffer.seek(0)
+    audio_b64 = base64.b64encode(buffer.read()).decode()
 
-    return buffer.read()
-
-# RunPod handler
-def handler(job):
-    job_input = job.get("input", {})
-    text = job_input.get("text")
-    voice = job_input.get("voice", DEFAULT_VOICE)
-
-    if not text:
-        return {"error": "Missing input.text"}
-
-    try:
-        audio_bytes = generate_audio(text, voice)
-        audio_b64 = base64.b64encode(audio_bytes).decode()
-
-        return {
-            "audio_base64": audio_b64,
-            "format": "wav",
-            "sample_rate": 24000,
-            "voice_used": voice
-        }
-    except Exception as e:
-        print("Generation error:", str(e))
-        return {"error": str(e)}
-
-print("Worker ready. Waiting for jobs...")
-runpod.serverless.start({"handler": handler})
+    return {"audio_base64": audio_b64, "format": "wav", "sample_rate": 24000, "voice_used": voice}
