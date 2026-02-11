@@ -14,9 +14,6 @@ WORKDIR /app
 COPY app.py .
 COPY requirements.txt .
 
-# Copy the prompts folder into the container
-COPY prompts/ prompts/
-
 # -------------------------------
 # Upgrade pip and install dependencies
 # -------------------------------
@@ -27,6 +24,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Environment variables
 # -------------------------------
 ENV MODEL_ID=cakebut/askvoxcsm-1b
+
+# Optional but recommended if repo is private
+# ENV HF_TOKEN=your_token_here
 
 # -------------------------------
 # Run the serverless app
