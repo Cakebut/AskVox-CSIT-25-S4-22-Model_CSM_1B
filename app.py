@@ -5,7 +5,7 @@ import torch
 import soundfile as sf
 import runpod
 
-from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
+from transformers import AutoProcessor, AutoModel
 
 # -------------------------------
 # Settings
@@ -23,12 +23,16 @@ print("Using device:", device)
 # -------------------------------
 # Load processor + model
 # -------------------------------
-processor = AutoProcessor.from_pretrained(MODEL_ID)
+processor = AutoProcessor.from_pretrained(
+    MODEL_ID,
+    trust_remote_code=True
+)
 
-model = AutoModelForSpeechSeq2Seq.from_pretrained(
+model = AutoModel.from_pretrained(
     MODEL_ID,
     torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-    device_map="auto"
+    device_map="auto",
+    trust_remote_code=True
 )
 
 model.eval()
@@ -38,10 +42,20 @@ print("Model loaded successfully!")
 # Generate audio
 # -------------------------------
 def generate_audio(text):
-    inputs = processor(text=text, return_tensors="pt").to(device)
+    # CSM expects speaker prefix
+    text = f"[0]{text}"
+
+    inputs = processor(
+        text,
+        return_tensors="pt"
+    ).to(device)
 
     with torch.no_grad():
-        audio_tokens = model.generate(**inputs)
+        audio_tokens = model.generate(
+            **inputs,
+            max_new_tokens=1024,
+            output_audio=True
+        )
 
     waveform = processor.decode(audio_tokens[0])
 
@@ -72,6 +86,7 @@ def handler(job):
         }
 
     except Exception as e:
+        print("Error:", str(e))
         return {"error": str(e)}
 
 # -------------------------------
