@@ -27,7 +27,7 @@ RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 # -------------------------------
-# Environment
+# Environment variables
 # -------------------------------
 ENV MODEL_ID=cakebut/askvoxcsm-1b
 ENV HF_HOME=/cache/huggingface
@@ -37,6 +37,6 @@ ENV TRANSFORMERS_CACHE=/cache/huggingface
 RUN mkdir -p /cache/huggingface
 
 # -------------------------------
-# Start app
+# Start worker
 # -------------------------------
 CMD ["python", "app.py"]
