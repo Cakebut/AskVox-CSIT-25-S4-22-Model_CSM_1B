@@ -2,8 +2,8 @@ import os
 import io
 import base64
 import torch
-import soundfile as sf
 import runpod
+import soundfile as sf
 
 from transformers import AutoProcessor, CsmForConditionalGeneration
 
@@ -22,7 +22,7 @@ print(f"Using device: {device}")
 processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
 model = CsmForConditionalGeneration.from_pretrained(
     MODEL_ID,
-    device_map=device,
+    device_map="auto",  # automatically use GPU if available
     trust_remote_code=True
 )
 model.eval()
@@ -32,13 +32,13 @@ print("Model loaded successfully!")
 # Generate audio
 # -------------------------------
 def generate_audio(text: str) -> bytes:
-    # CSM expects a speaker prefix
+    # Use default speaker 0
     text = f"[0]{text}"
 
     # Tokenize input
     inputs = processor(text, add_special_tokens=True).to(device)
 
-    # Generate audio
+    # Generate audio tensor
     with torch.no_grad():
         audio_tensor = model.generate(**inputs, output_audio=True)
 
@@ -52,7 +52,7 @@ def generate_audio(text: str) -> bytes:
     return buffer.read()
 
 # -------------------------------
-# RunPod handler
+# RunPod serverless handler
 # -------------------------------
 def handler(job):
     text = job.get("input", {}).get("text")
@@ -62,6 +62,7 @@ def handler(job):
     try:
         audio_bytes = generate_audio(text)
         audio_b64 = base64.b64encode(audio_bytes).decode()
+
         return {
             "audio_base64": audio_b64,
             "format": "wav",
