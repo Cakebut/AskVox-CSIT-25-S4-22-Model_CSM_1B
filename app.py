@@ -2,6 +2,7 @@ import os
 import io
 import base64
 import torch
+import soundfile as sf
 import runpod
 
 from transformers import AutoProcessor, CsmForConditionalGeneration
@@ -39,11 +40,14 @@ def generate_audio(text: str) -> bytes:
 
     # Generate audio
     with torch.no_grad():
-        audio = model.generate(**inputs, output_audio=True)
+        audio_tensor = model.generate(**inputs, output_audio=True)
 
-    # Save audio to buffer
+    # Convert to numpy waveform
+    waveform = audio_tensor[0].cpu().numpy()
+
+    # Save waveform to in-memory WAV buffer
     buffer = io.BytesIO()
-    processor.save_audio(audio, buffer)
+    sf.write(buffer, waveform, samplerate=24000, format="WAV")
     buffer.seek(0)
     return buffer.read()
 
@@ -64,6 +68,7 @@ def handler(job):
             "sample_rate": 24000
         }
     except Exception as e:
+        print("Error:", str(e))
         return {"error": str(e)}
 
 # -------------------------------
