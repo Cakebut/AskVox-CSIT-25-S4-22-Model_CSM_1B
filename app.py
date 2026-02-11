@@ -40,7 +40,14 @@ def generate_audio(text: str) -> bytes:
 
     # Generate audio tensor
     with torch.no_grad():
-        audio_tensor = model.generate(**inputs, output_audio=True)
+        audio_tensor = model.generate(
+            **inputs,
+            output_audio=True,
+            max_new_tokens=15000,   
+            do_sample=True,
+            temperature=0.7
+        )
+
 
     # Convert to numpy waveform
     waveform = audio_tensor[0].cpu().numpy()
