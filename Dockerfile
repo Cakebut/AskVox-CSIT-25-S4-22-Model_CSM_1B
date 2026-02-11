@@ -1,45 +1,33 @@
 # -------------------------------
-# Base image with CUDA + PyTorch
+# Base image with PyTorch + CUDA
 # -------------------------------
 FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
 
 WORKDIR /app
 
-# -------------------------------
-# System dependencies
-# -------------------------------
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
-    python3-pip \
-    wget \
     git \
-    ffmpeg \
+    wget \
+    python3-pip \
  && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip
 RUN pip install --upgrade pip
 
-# -------------------------------
-# Copy model + prompts into container
-# -------------------------------
-COPY csm-1b/ ./csm-1b/
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# -------------------------------
-# Copy application code + requirements
-# -------------------------------
+# Set HF_TOKEN if private repo
+# ENV HF_TOKEN=hf_xxxxx
+
+# Download CSM-1B model from Hugging Face
+RUN python -c "from huggingface_hub import snapshot_download; \
+    snapshot_download(repo_id='cakebut/askvoxcsm-1b', subfolder='csm-1b', local_dir='./csm-1b', token=None)"
+
+# Copy app code
 COPY app.py .
 
-RUN pip install --no-cache-dir \
-    fastapi \
-    uvicorn[standard] \
-    torch \
-    transformers \
-    soundfile
-
-# -------------------------------
-# Environment variables
-# -------------------------------
-ENV MODEL_DIR=./csm-1b
-
-# -------------------------------
-# Start FastAPI server
-# -------------------------------
-CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7000"]
+# Run the app
+CMD ["python", "app.py"]
