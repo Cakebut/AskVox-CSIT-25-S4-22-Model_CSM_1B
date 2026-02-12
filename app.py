@@ -11,96 +11,86 @@ from transformers import AutoProcessor, CsmForConditionalGeneration
 # Settings
 # -------------------------------
 MODEL_ID = os.getenv("MODEL_ID", "cakebut/askvoxcsm-1b")
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Voice safety limits (important for latency)
-MAX_TEXT_CHARS = 600          # prevents very long TTS requests
-MAX_NEW_TOKENS = 1500         # ~6–10 seconds of audio
-
-print(f"Loading model: {MODEL_ID}")
-print(f"Device: {DEVICE}")
+print(f"Loading model from: {MODEL_ID}")
+print(f"Using device: {device}")
 
 # -------------------------------
 # Load processor + model
 # -------------------------------
-processor = AutoProcessor.from_pretrained(
-    MODEL_ID,
-    trust_remote_code=True
-)
-
+processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
 model = CsmForConditionalGeneration.from_pretrained(
     MODEL_ID,
-    torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
     device_map="auto",
     trust_remote_code=True
 )
-
 model.eval()
-
 print("Model loaded successfully!")
-print("Worker ready.")
 
 # -------------------------------
-# Audio Generation
+# Utilities
 # -------------------------------
+def split_text_into_chunks(text, max_words=50):
+    """Split text into chunks of up to max_words each."""
+    words = text.split()
+    chunks = []
+    for i in range(0, len(words), max_words):
+        chunk = " ".join(words[i:i + max_words])
+        chunks.append(chunk)
+    return chunks
+
 def generate_audio(text: str) -> bytes:
-    # Limit text length to prevent long generation / timeouts
-    text = text.strip()
-    if len(text) > MAX_TEXT_CHARS:
-        text = text[:MAX_TEXT_CHARS]
+    """Generate audio for a single chunk of text."""
+    text = f"[0]{text}"  # Use default speaker 0
+    inputs = processor(text, add_special_tokens=True).to(device)
 
-    # Speaker 0
-    text = f"[0]{text}"
-
-    # Tokenize
-    inputs = processor(text, add_special_tokens=True)
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
-
-    # Generate audio
     with torch.no_grad():
-        audio_tensor = model.generate(
-            **inputs,
-            output_audio=True,
-            max_new_tokens=MAX_NEW_TOKENS,
-            do_sample=False,      # faster + stable
-        )
+        audio_tensor = model.generate(**inputs, output_audio=True)
 
     waveform = audio_tensor[0].cpu().numpy()
-
-    # Convert to WAV in memory
     buffer = io.BytesIO()
     sf.write(buffer, waveform, samplerate=24000, format="WAV")
     buffer.seek(0)
-
     return buffer.read()
 
+def generate_audio_chunks(text: str):
+    """Split long text and generate audio for each chunk."""
+    chunks = split_text_into_chunks(text, max_words=50)
+    audio_bytes_list = []
+
+    for chunk in chunks:
+        audio_bytes = generate_audio(chunk)
+        audio_bytes_list.append(audio_bytes)
+
+    return audio_bytes_list
+
 # -------------------------------
-# RunPod Handler
+# RunPod serverless handler
 # -------------------------------
 def handler(job):
-    job_input = job.get("input", {})
-    text = job_input.get("text")
-
+    text = job.get("input", {}).get("text")
     if not text:
         return {"error": "Missing input.text"}
 
     try:
-        print(f"[TTS] Received text length: {len(text)}")
+        audio_chunks = generate_audio_chunks(text)
 
-        audio_bytes = generate_audio(text)
-        audio_b64 = base64.b64encode(audio_bytes).decode()
+        # Convert each chunk to base64
+        audio_b64_list = [base64.b64encode(chunk).decode() for chunk in audio_chunks]
 
         return {
-            "audio_base64": audio_b64,
+            "audio_base64_list": audio_b64_list,
             "format": "wav",
-            "sample_rate": 24000
+            "sample_rate": 24000,
+            "chunk_count": len(audio_b64_list)
         }
-
     except Exception as e:
-        print("[TTS ERROR]", str(e))
+        print("Error:", str(e))
         return {"error": str(e)}
 
 # -------------------------------
 # Start RunPod worker
 # -------------------------------
+print("Worker ready.")
 runpod.serverless.start({"handler": handler})
