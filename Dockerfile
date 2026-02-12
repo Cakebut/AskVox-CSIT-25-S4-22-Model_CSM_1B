@@ -1,15 +1,14 @@
 # -------------------------------
-# Base image (smaller PyTorch + CUDA runtime)
+# Base image
 # -------------------------------
-FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn11-runtime
-
+FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
 
 WORKDIR /app
 
 # -------------------------------
 # System dependencies
 # -------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y \
     git \
     ffmpeg \
     libsndfile1 \
@@ -34,10 +33,10 @@ ENV MODEL_ID=cakebut/askvoxcsm-1b
 ENV HF_HOME=/cache/huggingface
 ENV TRANSFORMERS_CACHE=/cache/huggingface
 
-# Create cache directory (huggingface model cache)
+# Create cache directory
 RUN mkdir -p /cache/huggingface
 
 # -------------------------------
-# RunPod worker entrypoint
+# Start worker
 # -------------------------------
 CMD ["python", "app.py"]
