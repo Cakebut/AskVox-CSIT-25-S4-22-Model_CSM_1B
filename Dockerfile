@@ -1,9 +1,30 @@
 # -------------------------------
-# Base image
+# Base image (smaller PyTorch + CUDA runtime)
 # -------------------------------
-FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn11-runtime
 
 WORKDIR /app
+
+# -------------------------------
+# System dependencies
+# -------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ffmpeg \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# -------------------------------
+# Copy project files
+# -------------------------------
+COPY app.py .
+COPY requirements.txt .
+
+# -------------------------------
+# Install Python dependencies
+# -------------------------------
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
 
 # -------------------------------
 # Environment variables
@@ -11,43 +32,11 @@ WORKDIR /app
 ENV MODEL_ID=cakebut/askvoxcsm-1b
 ENV HF_HOME=/cache/huggingface
 ENV TRANSFORMERS_CACHE=/cache/huggingface
-ENV PYTHONUNBUFFERED=1
-ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
 
-# -------------------------------
-# System dependencies
-# -------------------------------
-RUN apt-get update && apt-get install -y \
-    git \
-    ffmpeg \
-    libsndfile1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create cache directory
+# Create cache directory (huggingface model cache)
 RUN mkdir -p /cache/huggingface
 
 # -------------------------------
-# Install Python dependencies
+# RunPod worker entrypoint
 # -------------------------------
-COPY requirements.txt .
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
-
-# -------------------------------
-# Pre-download model (IMPORTANT)
-# -------------------------------
-RUN python -c "from transformers import AutoProcessor, CsmForConditionalGeneration; \
-model_id='cakebut/askvoxcsm-1b'; \
-AutoProcessor.from_pretrained(model_id, trust_remote_code=True); \
-CsmForConditionalGeneration.from_pretrained(model_id, trust_remote_code=True); \
-print('Model downloaded successfully')"
-
-# -------------------------------
-# Copy application
-# -------------------------------
-COPY app.py .
-
-# -------------------------------
-# Start worker
-# -------------------------------
-CMD ["python", "-u", "app.py"]
+CMD ["python", "app.py"]
