@@ -1,97 +1,107 @@
 import os
 import io
 import base64
-import torch
+import subprocess
 import runpod
-import soundfile as sf
+import torch
+from transformers import AutoProcessor, AutoModel
+from huggingface_hub import login
 
-from transformers import AutoProcessor, CsmForConditionalGeneration
+# =====================
+# HuggingFace Login
+# =====================
+HF_TOKEN = os.environ.get("HF_TOKEN")
+if HF_TOKEN:
+    login(HF_TOKEN)
 
-# -------------------------------
-# Settings
-# -------------------------------
-MODEL_ID = os.getenv("MODEL_ID", "cakebut/askvoxcsm-1b")
+MODEL_ID = os.environ.get("MODEL_ID", "cakebut/askvoxcsm-1b")
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
-MAX_CHARS = 350   # safe size for serverless
 
-print(f"Loading model from: {MODEL_ID}")
-print(f"Using device: {device}")
-
-# -------------------------------
-# Load processor + model
-# -------------------------------
-processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-model = CsmForConditionalGeneration.from_pretrained(
+print("Loading model:", MODEL_ID)
+processor = AutoProcessor.from_pretrained(MODEL_ID)
+model = AutoModel.from_pretrained(
     MODEL_ID,
-    device_map="auto",
-    trust_remote_code=True
-)
+    torch_dtype=torch.float16,
+    low_cpu_mem_usage=True
+).to(device)
+
 model.eval()
-print("Model loaded successfully!")
+print("Model loaded.")
 
-# -------------------------------
-# Text splitter
-# -------------------------------
-def split_text(text, max_chars=MAX_CHARS):
-    chunks = []
-    while len(text) > max_chars:
-        split_at = text.rfind(" ", 0, max_chars)
-        if split_at == -1:
-            split_at = max_chars
-        chunks.append(text[:split_at].strip())
-        text = text[split_at:].strip()
-    if text:
-        chunks.append(text)
-    return chunks
+# =====================
+# WAV -> MP3
+# =====================
+def wav_to_mp3(wav_bytes):
+    process = subprocess.Popen(
+        [
+            "ffmpeg",
+            "-loglevel", "quiet",
+            "-f", "wav",
+            "-i", "pipe:0",
+            "-vn",
+            "-ar", "24000",
+            "-ac", "1",
+            "-b:a", "64k",
+            "-f", "mp3",
+            "pipe:1",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
 
-# -------------------------------
-# Generate audio for one chunk
-# -------------------------------
-def generate_audio_chunk(text):
-    text = f"[0]{text}"
-    inputs = processor(text, add_special_tokens=True).to(device)
+    mp3_bytes, _ = process.communicate(wav_bytes)
+    return mp3_bytes
 
-    with torch.no_grad():
-        audio_tensor = model.generate(**inputs, output_audio=True)
+# =====================
+# Generate audio
+# =====================
+@torch.inference_mode()
+def generate_audio(text: str):
+    inputs = processor(text=text, return_tensors="pt").to(device)
 
-    waveform = audio_tensor[0].cpu().numpy()
+    audio = model.generate(**inputs)
 
+    audio_array = audio.cpu().numpy()[0]
+
+    # Save WAV to memory
+    import soundfile as sf
     buffer = io.BytesIO()
-    sf.write(buffer, waveform, samplerate=24000, format="WAV")
-    buffer.seek(0)
+    sf.write(buffer, audio_array, 24000, format="WAV")
+    wav_bytes = buffer.getvalue()
 
-    return base64.b64encode(buffer.read()).decode()
+    # Convert to MP3
+    mp3_bytes = wav_to_mp3(wav_bytes)
 
-# -------------------------------
+    return mp3_bytes
+
+# =====================
 # RunPod handler
-# -------------------------------
-def handler(job):
-    text = job.get("input", {}).get("text")
-    if not text:
-        return {"error": "Missing input.text"}
-
+# =====================
+def handler(event):
     try:
-        chunks = split_text(text)
-        print(f"Text split into {len(chunks)} chunks")
+        text = event["input"].get("text", "")
 
-        audio_list = []
-        for chunk in chunks:
-            audio_b64 = generate_audio_chunk(chunk)
-            audio_list.append(audio_b64)
+        if not text:
+            return {"error": "No text provided"}
+
+        print(f"TTS request len={len(text)}")
+
+        mp3_bytes = generate_audio(text)
+
+        audio_base64 = base64.b64encode(mp3_bytes).decode("utf-8")
 
         return {
-            "audio_base64_list": audio_list,
-            "format": "wav",
-            "sample_rate": 24000
+            "audio_base64": audio_base64,
+            "format": "mp3"
         }
 
     except Exception as e:
-        print("Error:", str(e))
+        print("ERROR:", str(e))
         return {"error": str(e)}
 
-
-# -------------------------------
+# =====================
 # Start worker
-# -------------------------------
-print("Worker ready.")
+# =====================
 runpod.serverless.start({"handler": handler})
