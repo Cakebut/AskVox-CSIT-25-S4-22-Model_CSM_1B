@@ -15,16 +15,16 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # -------------------------------
-# Copy project files
+# Python dependencies first (better caching)
 # -------------------------------
-COPY app.py .
 COPY requirements.txt .
-
-# -------------------------------
-# Install Python dependencies
-# -------------------------------
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
+
+# -------------------------------
+# Copy app after deps
+# -------------------------------
+COPY app.py .
 
 # -------------------------------
 # Environment variables
@@ -33,7 +33,6 @@ ENV MODEL_ID=cakebut/askvoxcsm-1b
 ENV HF_HOME=/cache/huggingface
 ENV TRANSFORMERS_CACHE=/cache/huggingface
 
-# Create cache directory
 RUN mkdir -p /cache/huggingface
 
 # -------------------------------
