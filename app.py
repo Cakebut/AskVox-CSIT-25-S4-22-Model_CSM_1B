@@ -89,6 +89,7 @@ def handler(job):
         print("Error:", str(e))
         return {"error": str(e)}
 
+
 # -------------------------------
 # Start worker
 # -------------------------------
